@@ -12,6 +12,7 @@ import (
 	"path"
 	"path/filepath"
 	// "strings"
+	persistense "github.com/tbolsh/extend-go-nginx-postgres-docker/persistense"
 )
 
 var (
@@ -29,6 +30,14 @@ func main() {
 	if *port < 1 || *port > 65535 {
 		log.Fatalf("Port should be between 0 and 65536 but it is %d", port)
 	}
+	persistense.Initialize()
+	go func() {
+		err := persistense.CreateTable("clients", []string{
+			`create table clients(api_key varchar(64), extend_api_key varchar(256), PRIMARY KEY(api_key, extend_api_key));`,
+			`CREATE INDEX clients_idx ON clients(api_key);`,
+		})
+		sqlerr(err)
+	}()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/alive", alive)
 	srv := &http.Server{
@@ -45,9 +54,15 @@ type proxy struct{ Handler http.Handler }
 
 func (p proxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	p.Handler.ServeHTTP(w, req)
-	w.Header().Add("Strict-Transport-Security", "max-age=63072000; includeSubDomains")
+	// w.Header().Add("Strict-Transport-Security", "max-age=63072000; includeSubDomains")
 }
 
 func alive(w http.ResponseWriter, req *http.Request) {
-	w.Write([]byte(`{"alive"}`))
+	w.Write([]byte(`{"alive": true}`))
+}
+
+func sqlerr(err error) {
+	if err != nil {
+		log.Printf("SQL Error '%v'", err)
+	}
 }
