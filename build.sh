@@ -19,10 +19,10 @@ if [ $? -ne 0 ]; then
     exit
 fi
 
-#go test -v github.com/providenceinnovation/c20-alexa-skills/dialogi
-#if [ $? -ne 0 ]; then
-#    exit
-#fi
+go test -v github.com/tbolsh/extend-go-nginx-postgres-docker/genericjson
+if [ $? -ne 0 ]; then
+    exit
+fi
 
 OOS=linux GOARCH=amd64 go build -o extend-api-service src/extend-api-service.go
 if [ $? -ne 0 ]; then

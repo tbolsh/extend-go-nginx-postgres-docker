@@ -3,11 +3,12 @@ package main
 // https://gethttpsforfree.com/
 
 import (
-	// "encoding/json"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"github.com/gorilla/mux"
+	gjson "github.com/tbolsh/extend-go-nginx-postgres-docker/genericjson"
 	persistense "github.com/tbolsh/extend-go-nginx-postgres-docker/persistense"
 	"io"
 	"io/ioutil"
@@ -45,7 +46,7 @@ func main() {
 	rtr.HandleFunc("/alive", alive).Methods("GET")
 	rtr.HandleFunc("/version", version).Methods("GET")
 	rtr.HandleFunc("/cards", listCards).Methods("GET")
-	rtr.HandleFunc("/cards/{card:[a-z0-9\\-_]+}/transactions", listTransactions).Methods("GET")
+	rtr.HandleFunc("/cards/{card:[A-z0-9\\-_]+}/transactions", listTransactions).Methods("GET")
 	rtr.HandleFunc("/cards/{card:[A-z0-9\\-_]+}/transactions/{transaction:[0-9aA-z\\-_]+}", details).Methods("GET")
 	// mux.HandleFunc("/cards/")
 	srv := &http.Server{
@@ -97,11 +98,19 @@ $ curl -H "API-Key: xxx" http://localhost:8008/cards
 []
 */
 func listCards(w http.ResponseWriter, req *http.Request) {
-	if _, err := signin(req); err != nil {
+	if tok, err := signin(req); err != nil {
 		log.Println(err)
 		w.WriteHeader(http.StatusUnauthorized)
 	} else {
-		w.Write([]byte(`{"list_cards": true}`))
+		reqOut, _ := http.NewRequest(http.MethodGet, "https://api.paywithextend.com/virtualcards/", nil)
+		reqOut.Header.Add("Authorization", fmt.Sprintf("Bearer %s", tok))
+		if cards, err := extendAPI(reqOut); err != nil {
+			log.Println(err)
+			w.WriteHeader(http.StatusUnauthorized)
+		} else {
+			retval, _ := json.MarshalIndent(cards, "  ", "  ")
+			w.Write(retval)
+		}
 	}
 }
 
@@ -110,12 +119,21 @@ $ curl -H "API-Key: xxx" http://localhost:8008/cards/XXX/transactions
 []
 */
 func listTransactions(w http.ResponseWriter, req *http.Request) {
-	if _, err := signin(req); err != nil {
+	if tok, err := signin(req); err != nil {
 		log.Println(err)
 		w.WriteHeader(http.StatusUnauthorized)
 	} else {
 		params := mux.Vars(req)
-		w.Write([]byte(fmt.Sprintf(`{"card":"%s"}`, params["card"])))
+		reqOut, _ := http.NewRequest(http.MethodGet,
+			fmt.Sprintf("https://api.paywithextend.com/virtualcards/%s/transactions", params["card"]), nil)
+		reqOut.Header.Add("Authorization", fmt.Sprintf("Bearer %s", tok))
+		if cards, err := extendAPI(reqOut); err != nil {
+			log.Println(err)
+			w.WriteHeader(http.StatusUnauthorized)
+		} else {
+			retval, _ := json.MarshalIndent(cards, "  ", "  ")
+			w.Write(retval)
+		}
 	}
 }
 
@@ -136,6 +154,7 @@ func details(w http.ResponseWriter, req *http.Request) {
 type token struct {
 	Token      string
 	Expiration time.Time
+	User       gjson.GenJson
 }
 
 var cache = make(map[string]token)
@@ -156,14 +175,17 @@ func signin(req *http.Request) (string, error) {
 		}
 		reqOut, err := http.NewRequest(http.MethodPost, "https://api.paywithextend.com/signin",
 			strings.NewReader(fmt.Sprintf(`{ "email": "%s", "password": "%s" }`, data[0][0], data[0][1])))
-		body, err := extendAPIreqOut)
-		cache[apiKey] = token{Token: string(body), Expiration: time.Now().Add(time.Hour)}
-		return string(body), nil
+		g, err := extendAPI(reqOut)
+		if err != nil {
+			return "", err
+		}
+		t = token{Token: g.StringOrEmpty("token"), Expiration: time.Now().Add(time.Hour), User: g.UnwindOrNil("user")}
+		cache[apiKey] = t
 	}
 	return t.Token, nil
 }
 
-func extendAPI(reqOut *http.Request) ([]byte, error) {
+func extendAPI(reqOut *http.Request) (gjson.GenJson, error) {
 	reqOut.Header.Add("Content-Type", "application/json")
 	reqOut.Header.Add("Accept", "application/vnd.paywithextend.v2021-03-12+json")
 	client := &http.Client{
@@ -171,12 +193,16 @@ func extendAPI(reqOut *http.Request) ([]byte, error) {
 	}
 	resp, err := client.Do(reqOut)
 	if err != nil {
-		return []byte{}, fmt.Errorf("Error from extend API: %v", err)
+		return gjson.FromGeneric(nil), fmt.Errorf("error from extend API: %v", err)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return []byte{}, fmt.Errorf("Error reading extend API response: %v", err)
+		return gjson.FromGeneric(nil), fmt.Errorf("error reading extend API response: %v", err)
 	}
-	return body, nil
+	var retval gjson.GenJson
+	if err := json.Unmarshal(body, &retval); err != nil {
+		return gjson.FromGeneric(nil), fmt.Errorf("error unmarshaling extend API response: %v (%s)", err, string(body))
+	}
+	return retval, nil
 }
