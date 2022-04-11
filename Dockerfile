@@ -21,6 +21,7 @@ ADD startup.sh /root
 ADD start.sh  /root/
 ADD extend-api-service /root/
 ADD extend-api       /etc/logrotate.d/extend-api
+ADD version /root/
 EXPOSE 8000
 
 ENTRYPOINT /root/startup.sh; /bin/bash
