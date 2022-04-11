@@ -142,13 +142,23 @@ $ curl -H "API-Key: xxx" http://localhost:8008/cards/XXX/transactions/YYY
 []
 */
 func details(w http.ResponseWriter, req *http.Request) {
-	if _, err := signin(req); err != nil {
+	if tok, err := signin(req); err != nil {
 		log.Println(err)
 		w.WriteHeader(http.StatusUnauthorized)
 	} else {
 		params := mux.Vars(req)
-		w.Write([]byte(fmt.Sprintf(`{"transaction": "%s", "card":"%s"}`, params["transaction"], params["card"])))
+		reqOut, _ := http.NewRequest(http.MethodGet,
+			fmt.Sprintf("https://api.paywithextend.com/transactions/%s", params["transaction"]), nil)
+		reqOut.Header.Add("Authorization", fmt.Sprintf("Bearer %s", tok))
+		if cards, err := extendAPI(reqOut); err != nil {
+			log.Println(err)
+			w.WriteHeader(http.StatusUnauthorized)
+		} else {
+			retval, _ := json.MarshalIndent(cards, "  ", "  ")
+			w.Write(retval)
+		}
 	}
+
 }
 
 type token struct {
