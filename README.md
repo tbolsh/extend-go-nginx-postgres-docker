@@ -29,7 +29,7 @@ more at [here](https://docs.docker.com/get-started/overview/)
 
 Go service is solving following problem:
 ____________________________
-As part of the assignment, we are sending you a $50 virtual card. Please reply stating that you agree to continue in the interview process and we will send you a virtual card for which you will receive an email notification. Note that you will be required to create an account on our website or mobile application in order to access it. This virtual card will be the source of the data you will be querying from our API for this project. To generate data, please make at least two purchases on this card; whatever you buy is yours to keep -- a token of appreciation for your efforts.
+... This virtual card will be the source of the data you will be querying from our API for this project. To generate data, please make at least two purchases on this card; whatever you buy is yours to keep -- a token of appreciation for your efforts.
 
 
 Using the virtual card we sent you, and the credentials associated with your user, we would like you to build an API service that exposes the following functionality:
