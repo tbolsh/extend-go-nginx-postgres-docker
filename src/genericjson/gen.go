@@ -65,6 +65,14 @@ func (self GenJson) Float(args ...interface{}) (retval float64, err error) {
 	return
 }
 
+func (self GenJson) FloatOrZero(args ...interface{}) float64 {
+  if f, err := self.Float(args...); err != nil {
+		return 0.0
+	}else{
+		return f
+	}
+}
+
 func (self GenJson) Empty() bool {
 	return self.Any == nil
 }

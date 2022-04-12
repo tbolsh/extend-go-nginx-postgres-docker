@@ -46,7 +46,9 @@ func main() {
 	rtr.HandleFunc("/alive", alive).Methods("GET")
 	rtr.HandleFunc("/version", version).Methods("GET")
 	rtr.HandleFunc("/cards", listCards).Methods("GET")
+	rtr.HandleFunc("/cards/", listCards).Methods("GET")
 	rtr.HandleFunc("/cards/{card:[A-z0-9\\-_]+}/transactions", listTransactions).Methods("GET")
+	rtr.HandleFunc("/cards/{card:[A-z0-9\\-_]+}/transactions/", listTransactions).Methods("GET")
 	rtr.HandleFunc("/cards/{card:[A-z0-9\\-_]+}/transactions/{transaction:[0-9aA-z\\-_]+}", details).Methods("GET")
 	// mux.HandleFunc("/cards/")
 	srv := &http.Server{
@@ -93,6 +95,14 @@ func sqlerr(err error) {
 	}
 }
 
+type card struct {
+	Id      string
+	Last4   string
+	Balance float64
+	Name    string
+	Status  string
+}
+
 /*
 $ curl -H "API-Key: xxx" http://localhost:8008/cards
 []
@@ -102,16 +112,37 @@ func listCards(w http.ResponseWriter, req *http.Request) {
 		log.Println(err)
 		w.WriteHeader(http.StatusUnauthorized)
 	} else {
-		reqOut, _ := http.NewRequest(http.MethodGet, "https://api.paywithextend.com/virtualcards/", nil)
+		reqOut, _ := http.NewRequest(http.MethodGet, "https://api.paywithextend.com/virtualcards?count=50", nil)
 		reqOut.Header.Add("Authorization", fmt.Sprintf("Bearer %s", tok))
 		if cards, err := extendAPI(reqOut); err != nil {
 			log.Println(err)
 			w.WriteHeader(http.StatusUnauthorized)
 		} else {
-			retval, _ := json.MarshalIndent(cards, "  ", "  ")
+			// retval, _ := json.MarshalIndent(cards, "  ", "  ") // pass through
+			cardsOutput := make([]card, 0)
+			for _, c := range cards.ArrayOrEmpty("virtualCards") {
+				g := gjson.FromGeneric(c)
+				cardsOutput = append(cardsOutput,
+					card{
+						Id:      g.StringOrEmpty("id"),
+						Last4:   g.StringOrEmpty("last4"),
+						Balance: g.FloatOrZero("balanceCents") * 0.01,
+						Name:    g.StringOrEmpty("displayName"),
+						Status:  g.StringOrEmpty("status"),
+					})
+			}
+			retval, _ := json.MarshalIndent(cardsOutput, "  ", "  ")
 			w.Write(retval)
 		}
 	}
+}
+
+type tx struct {
+	Id      string
+	Amount  float64
+	Name    string
+	Status  string
+	Updated string
 }
 
 /*
@@ -125,13 +156,26 @@ func listTransactions(w http.ResponseWriter, req *http.Request) {
 	} else {
 		params := mux.Vars(req)
 		reqOut, _ := http.NewRequest(http.MethodGet,
-			fmt.Sprintf("https://api.paywithextend.com/virtualcards/%s/transactions", params["card"]), nil)
+			fmt.Sprintf("https://api.paywithextend.com/virtualcards/%s/transactions?status=PENDING,CLEARED,DECLINED&count=500", params["card"]), nil)
 		reqOut.Header.Add("Authorization", fmt.Sprintf("Bearer %s", tok))
-		if cards, err := extendAPI(reqOut); err != nil {
+		if txs, err := extendAPI(reqOut); err != nil {
 			log.Println(err)
 			w.WriteHeader(http.StatusUnauthorized)
 		} else {
-			retval, _ := json.MarshalIndent(cards, "  ", "  ")
+			// retval, _ := json.MarshalIndent(cards, "  ", "  ") pass all_3_passthrough
+			txsOutput := make([]tx, 0)
+			for _, t := range txs.ArrayOrEmpty("transactions") {
+				g := gjson.FromGeneric(t)
+				txsOutput = append(txsOutput,
+					tx{
+						Id:      g.StringOrEmpty("id"),
+						Amount:  g.FloatOrZero("authBillingAmountCents") * 0.01,
+						Name:    g.StringOrEmpty("merchantName"),
+						Status:  g.StringOrEmpty("status"),
+						Updated: g.StringOrEmpty("updatedAt"),
+					})
+			}
+			retval, _ := json.MarshalIndent(txsOutput, "  ", "  ")
 			w.Write(retval)
 		}
 	}
@@ -162,9 +206,8 @@ func details(w http.ResponseWriter, req *http.Request) {
 }
 
 type token struct {
-	Token      string
-	Expiration time.Time
-	User       gjson.GenJson
+	Token string
+	User  gjson.GenJson
 }
 
 var cache = make(map[string]token)
@@ -175,7 +218,7 @@ func signin(req *http.Request) (string, error) {
 		return "", errors.New("api-Key is not specified!")
 	}
 	t, ok := cache[apiKey]
-	if !ok || t.Expiration.Before(time.Now()) {
+	if !ok || expirationTime(t.Token).Before(time.Now().UTC()) {
 		data, err := persistense.Query("SELECT email, password FROM clients WHERE api_key=$1", strings.TrimSpace(apiKey))
 		if err != nil {
 			return "", fmt.Errorf("api-Key is not found: %s", err)
@@ -189,7 +232,7 @@ func signin(req *http.Request) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		t = token{Token: g.StringOrEmpty("token"), Expiration: time.Now().Add(time.Hour), User: g.UnwindOrNil("user")}
+		t = token{Token: g.StringOrEmpty("token"), User: g.UnwindOrNil("user")}
 		cache[apiKey] = t
 	}
 	return t.Token, nil
@@ -215,4 +258,29 @@ func extendAPI(reqOut *http.Request) (gjson.GenJson, error) {
 		return gjson.FromGeneric(nil), fmt.Errorf("error unmarshaling extend API response: %v (%s)", err, string(body))
 	}
 	return retval, nil
+}
+
+var epoch = time.Unix(0, 0)
+
+func expirationTime(tok string) time.Time {
+	if strings.TrimSpace(tok) == "" {
+		log.Println(errors.New("empty token - cannot find expiration time"))
+		return epoch
+	}
+	parts := strings.Split(tok, ".")
+	if len(parts) != 3 {
+		log.Println(fmt.Errorf("incorrectly formatted token - cannot find expiration time '%s'", tok))
+		return epoch
+	}
+	var g gjson.GenJson
+	if err := json.Unmarshal([]byte(parts[1]), &g); err != nil {
+		log.Println(err)
+		return epoch
+	}
+	if sec, err := g.Int("exp"); err != nil {
+		log.Println(err)
+		return epoch
+	} else {
+		return time.Unix(int64(sec), 0)
+	}
 }
