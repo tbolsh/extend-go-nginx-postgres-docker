@@ -1,4 +1,4 @@
-# Dockerize go service along with Nginx and PostgreSQL
+# Dockerized go service along with Nginx and PostgreSQL (solving Extend API challenge)
 
 Docker will make your life a bit easier when it comes to deployment and CI/CD. This method can be used to deploy most stacks with Nginx and Postgres,
 
@@ -8,7 +8,7 @@ Your system must have [docker-compose](https://docs.docker.com/compose/install/)
 
 ```bash
 docker-compose build
-docker-compose up
+docker-compose up -d
 ```
 You would be able to access
 
